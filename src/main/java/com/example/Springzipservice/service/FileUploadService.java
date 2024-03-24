@@ -8,13 +8,10 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -26,11 +23,11 @@ public class FileUploadService {
 
     public Flux<DataBuffer> processFiles(List<FilePart> fileParts) {
         ConcurrentMap<String, Boolean> processedFiles = new ConcurrentHashMap<>();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ZipOutputStream zos = new ZipOutputStream(baos);
 
         return Flux.fromIterable(fileParts)
                 .flatMap(filePart -> {
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    ZipOutputStream zos = new ZipOutputStream(baos);
                     return filePart.content()
                             .collectList() // Collect the DataBuffers into a List
                             .flatMap(dataBuffers -> {
@@ -44,32 +41,40 @@ public class FileUploadService {
                                     }
                                     String uniqueFilename = filename + "." + fileType;
                                     zos.putNextEntry(new ZipEntry(uniqueFilename));
+
+                                    // Read and write the file in chunks
+                                    // This is done to avoid loading the entire file into memory
+                                    byte[] bytes = new byte[1024];
+                                    int length;
                                     for (DataBuffer dataBuffer : dataBuffers) {
-                                        zos.write(dataBuffer.asInputStream().readAllBytes());
+                                        try (InputStream is = dataBuffer.asInputStream()) {
+                                            while ((length = is.read(bytes)) != -1) {
+                                                zos.write(bytes, 0, length);
+                                            }
+                                        }
                                     }
+
                                     zos.closeEntry();
 
-                                    System.out.println("Added file: " + filenameWithType + " to zip: " + uniqueFilename);
-                                    zos.close();
-
-
-                                    // Save the zipped file to the output directory of the project
-                                    Path path = Paths.get(Constants.OUTPUT_DIRECTORY, filename + ".zip");
-                                    Files.createDirectories(path.getParent()); // Create the directory if it does not exist
-                                    Files.write(path, baos.toByteArray());
-                                    System.out.println("Zipped file saved to: " + path);
+                                    System.out.println("Added file: " + filenameWithType + " to zip: allFiles.zip");
                                     return Mono.just(dataBuffers); // Emit the DataBuffers again
                                 } catch (IOException e) {
-                                    throw new RuntimeException(e);
+                                    return Mono.error(new RuntimeException(e));
                                 }
                             })
-                            .flatMapMany(Flux::fromIterable) // Convert the Mono<List<DataBuffer>> to Flux<DataBuffer>
-                            .map(dataBuffer -> new DefaultDataBufferFactory().wrap(baos.toByteArray()))
-                            .onErrorResume(e -> {
-                                // Handle the exception here. You can log the error, return a default value, etc.
-                                System.err.println("An error occurred while processing the file: " + e.getMessage());
-                                return Flux.empty(); // Return an empty Flux in case of error
-                            });
+                            .flatMapIterable(dataBuffers -> dataBuffers); // Convert the Mono<List<DataBuffer>> to Flux<DataBuffer>
+                })
+                .doOnComplete(() -> {
+                    try {
+                        zos.close();
+                        // Save the zipped file to the output directory of the project
+                        Path path = Paths.get(Constants.OUTPUT_DIRECTORY, "allFiles.zip");
+                        Files.createDirectories(path.getParent()); // Create the directory if it does not exist
+                        Files.write(path, baos.toByteArray());
+                        System.out.println("Zipped file saved to: " + path);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 });
     }
 }
