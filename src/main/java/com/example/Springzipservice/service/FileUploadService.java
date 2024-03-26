@@ -26,6 +26,11 @@ import java.util.zip.ZipOutputStream;
 @Slf4j
 @RequiredArgsConstructor
 public class FileUploadService {
+    public static long getFileSizeInKB(String filePath) throws IOException {
+        Path path = Paths.get(filePath);
+        long sizeInBytes = Files.size(path);
+        return sizeInBytes / 1024;
+    }
     private final StorageProperties storageProperties;
     public Flux<DataBuffer> processFiles(List<FilePart> fileParts) {
         ConcurrentMap<String, Boolean> processedFiles = new ConcurrentHashMap<>();
@@ -68,6 +73,7 @@ public class FileUploadService {
                                                         // Calculate progress
                                                         double progress = (double) zippedSize.get() / totalSize;
                                                         log.info(String.format("Progress: %.2f%%\n", progress * 100));
+                                                        log.info("Zipped file size: " + zippedSize.get() + " bytes");
                                                     }
                                                 }
                                             }
@@ -93,7 +99,7 @@ public class FileUploadService {
                                 zos.close();
 
                                 // Save the zipped file to the output directory of the project
-                                Path path = Paths.get(storageProperties.getLocation()+"allFiles.zip");
+                                Path path = Paths.get(storageProperties.getLocation()+"/allFiles.zip");
                                 Files.createDirectories(path.getParent()); // Create the directory if it does not exist
                                 Files.write(path, baos.toByteArray());
                                 log.info("Zipped file saved to: " + path);
