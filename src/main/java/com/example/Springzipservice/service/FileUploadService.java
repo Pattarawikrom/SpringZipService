@@ -1,9 +1,13 @@
 package com.example.Springzipservice.service;
 
 import com.example.Springzipservice.config.Constants;
+import com.example.Springzipservice.config.StorageProperties;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -19,7 +23,10 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class FileUploadService {
+    private final StorageProperties storageProperties;
     public Flux<DataBuffer> processFiles(List<FilePart> fileParts) {
         ConcurrentMap<String, Boolean> processedFiles = new ConcurrentHashMap<>();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -43,11 +50,10 @@ public class FileUploadService {
                                             String filename = filenameWithType.substring(0, filenameWithType.lastIndexOf('.')); // Filename without extension
                                             String fileType = filenameWithType.substring(filenameWithType.lastIndexOf('.') + 1); // File extension
                                             if (processedFiles.putIfAbsent(filenameWithType, true) != null) {
-                                                System.out.println("Skipping duplicate file: " + filenameWithType);
+                                                log.info("Skipping duplicate file: " + filenameWithType);
                                                 return Mono.empty(); // Skip this file if it has already been processed
                                             }
-                                            String uniqueFilename = filename + "." + fileType;
-                                            zos.putNextEntry(new ZipEntry(uniqueFilename));
+                                            zos.putNextEntry(new ZipEntry(filenameWithType));
 
                                             // Read and write the file in chunks
                                             // This is done to avoid loading the entire file into memory
@@ -61,17 +67,22 @@ public class FileUploadService {
 
                                                         // Calculate progress
                                                         double progress = (double) zippedSize.get() / totalSize;
-                                                        System.out.printf("Progress: %.2f%%\n", progress * 100);
+                                                        log.info(String.format("Progress: %.2f%%\n", progress * 100));
                                                     }
                                                 }
                                             }
 
-                                            zos.closeEntry();
-
-                                            System.out.println("Added file: " + filenameWithType + " to zip: allFiles.zip");
+                                            log.info("Added file: " + filenameWithType + " to zip: allFiles.zip");
+                                            log.info(" File at: " + storageProperties.getLocation());
                                             return Mono.just(dataBuffers); // Emit the DataBuffers again
                                         } catch (IOException e) {
                                             return Mono.error(new RuntimeException(e));
+                                        } finally {
+                                            try {
+                                                zos.closeEntry();
+                                            } catch (IOException e) {
+                                                log.error("An error occurred while closing the ZipEntry: ", e);
+                                            }
                                         }
                                     })
                                     .flatMapIterable(dataBuffers -> dataBuffers); // Convert the Mono<List<DataBuffer>> to Flux<DataBuffer>
@@ -82,22 +93,21 @@ public class FileUploadService {
                                 zos.close();
 
                                 // Save the zipped file to the output directory of the project
-                                Path path = Paths.get(Constants.OUTPUT_DIRECTORY, "allFiles.zip");
+                                Path path = Paths.get(storageProperties.getLocation()+"allFiles.zip");
                                 Files.createDirectories(path.getParent()); // Create the directory if it does not exist
                                 Files.write(path, baos.toByteArray());
-                                System.out.println("Zipped file saved to: " + path);
+                                log.info("Zipped file saved to: " + path);
                             } catch (IOException e) {
-                                System.err.println("An error occurred while saving the zip file: " + e.getMessage());
-                                e.printStackTrace();
+                                log.error("An error occurred while saving the zip file: " + e.getMessage(), e);
                             }
                         })
                         .doOnError(e -> {
                             try {
                                 zos.close();
                             } catch (IOException ioException) {
-                                ioException.printStackTrace();
+                                log.error("An error occurred while closing the ZipOutputStream: ", ioException);
                             }
-                            System.err.println("An error occurred during file processing: " + e.getMessage());
+                            log.error("An error occurred during file processing: " + e.getMessage(), e);
                         })
         );
     }
