@@ -16,7 +16,8 @@ public interface FileUploadControllerSwagger {
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Files uploaded successfully"),
             @ApiResponse(responseCode = "400", description = "Invalid request"),
-            @ApiResponse(responseCode = "413", description = "File size exceeds the maximum limit")
+            @ApiResponse(responseCode = "413", description = "File size exceeds the maximum limit"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     Flux<DataBuffer> upload(@RequestPart("files") List<FilePart> fileParts);
 }
